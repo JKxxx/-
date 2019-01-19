@@ -68,6 +68,95 @@ int main()
 			for (int k = 0; k < 3; k++)
 			{
 				dst.at<Vec3b>(i, j)[k] = t[pos];
+				//此句报错：不能将“int *”类型分配给“uchar”实体
+			}
+		}
+	}
+	imshow("dst", dst);
+	waitKey();
+	return 0;
+}
+
+发现在最初时建立的是t[n][n],所以后来为int* 型数据。
+
+修改
+
+显示为一片黑，结果如图1
+检查发现为几个float错写为int，失误失误。
+
+最终代码：
+
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+#include <cloneviewhelper.h>
+#include "../common/book.h"
+#include <stdio.h>
+#include <opencv2/core/core.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#pragma comment(lib,"opencv_world401d.lib")
+#define N 250
+using namespace cv;
+struct cuComplex
+{
+	float r, i;
+	__device__ cuComplex(float real,float imag):r(real),i(imag){}
+	__device__ float magnitude2()
+	{
+		return r * r + i * i;
+	}
+	__device__ cuComplex operator*(const cuComplex &a)
+	{
+		return cuComplex(r*a.r - i * a.i, r*a.i + i * a.r);
+	}
+	__device__ cuComplex operator+(const cuComplex &a)
+	{
+		return cuComplex(r + a.r, i + a.i);
+	}
+};
+
+__device__ int jujia(int x, int y)
+{
+	const float temp = 1.5;
+	float jx = temp * (float)(N / 2 - x) / (N / 2);
+	float jy = temp * (float)(N / 2 - y) / (N / 2);
+	cuComplex c(-0.8, 0.156);
+	cuComplex z(jx, jy);
+	for (int i = 0; i < 200; i++)
+	{
+		z = z * z + c;
+		if (z.magnitude2() > 1000)
+			return 0;
+	}
+	return 1;
+}
+
+__global__ void jujiakernel(int *t)
+{
+	int tidx = blockIdx.x;
+	int tidy = blockIdx.y;
+	int pos = tidx + tidy * gridDim.x;
+	int value = jujia(tidx, tidy) * 255;
+	t[pos] = value;
+}
+int main()
+{
+	int *dev_t, t[N*N];
+	Mat dst = Mat(N, N, CV_8UC3);
+	cudaMalloc((void**)&dev_t, sizeof(int)*N*N);
+	cudaMemcpy(dev_t, t, sizeof(int)*N*N, cudaMemcpyHostToDevice);
+	dim3 grid(N, N);
+	jujiakernel << <grid, 1 >> > (dev_t);
+	cudaMemcpy(t, dev_t, sizeof(int)*N*N, cudaMemcpyDeviceToHost);
+	
+	for (int i = 0; i < N; i++)
+	{
+		for (int j = 0; j < N; j++)
+		{
+			int pos = i * N + j;
+			printf("%d is %d\n", pos, t[pos]);
+			for (int k = 0; k < 3; k++)
+			{
+				dst.at<Vec3b>(i, j)[k] = t[pos];
 			}
 		}
 	}
@@ -77,3 +166,4 @@ int main()
 }
 
 
+结果如2~n（修改c）
